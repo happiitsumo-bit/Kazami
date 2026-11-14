@@ -12,11 +12,20 @@
 | 画面 | Next.js（App Router）→ Vercel |
 | データ | Supabase（PostgreSQL）。pg_cron + pg_net で毎時 Open-Meteo と aviationweather.gov から取得 |
 
-- `app/page.tsx` … Supabase から予報と観測を読み、10分ごとに作り直す
-- `lib/forecast.ts` … DB のデータを画面用の形にそろえる
-- `lib/kazami.js` / `lib/markup.ts` … 画面（モックから移植）
-- `lib/dem-*.json` … 地図の海岸線用の標高データ（Open-Meteo Elevation API）
-- `supabase/migrations/` … テーブルと毎時の取得処理
+```
+app/page.tsx                 Supabase から予報と観測を読む（サーバー側、10分ごとに作り直し）
+lib/forecast.ts              DB のデータを画面用の形にそろえる
+lib/wind.ts                  風向の計算、見出し・作戦メモを作るロジック（純粋な関数）
+lib/terrain.ts               大村湾の標高データ・練習エリア・地名
+lib/courses.ts               上下／アウター／インナーのコース形
+lib/samples.ts               まだ実データがないタブのサンプル
+components/KazamiApp.tsx     日付とタブの状態を持つ全体
+components/Header.tsx
+components/forecast/         「風の予報」タブ（WindMap / Verdict / HourStrip / PlanMemo / ModelDetails）
+components/charts/LineChart.tsx
+components/samples/          「似た日」「実測と答え合わせ」「レース振り返り」タブ
+supabase/migrations/         テーブルと毎時の取得処理
+```
 
 ## 手元で動かす
 
