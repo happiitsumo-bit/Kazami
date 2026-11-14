@@ -6,6 +6,8 @@ import type { CourseKey } from "@/lib/courses";
 import type { Forecast } from "@/lib/forecast";
 import { dirAt, gustAt, makeDay, planItems, shiftAt, speedAt, summarize, STRIP_HOURS } from "@/lib/wind";
 import WindMap from "./WindMap";
+import MapTools from "./MapTools";
+import { useFacility } from "./useFacility";
 import Verdict from "./Verdict";
 import HourStrip from "./HourStrip";
 import PlanMemo from "./PlanMemo";
@@ -20,6 +22,7 @@ export default function ForecastView({ fc, dayKey, dayText, shortDate }: Props) 
   const [playing, setPlaying] = useState(false);
   const [course, setCourse] = useState<CourseKey>("wl");
   const [legKm, setLegKm] = useState(0.2);
+  const fac = useFacility();
 
   // ▶ で 8〜17時を順に送る
   useEffect(() => {
@@ -36,19 +39,33 @@ export default function ForecastView({ fc, dayKey, dayText, shortDate }: Props) 
   return (
     <section className="view">
       <div className="panel today">
-        <WindMap
-          hour={hour}
-          dir={dirAt(day, hour)}
-          speed={speedAt(day, hour)}
-          gust={gustAt(day, hour)}
-          course={course}
-          legKm={legKm}
-          playing={playing}
-          onHour={pick}
-          onTogglePlay={() => setPlaying((v) => !v)}
-          onCourse={setCourse}
-          onLeg={setLegKm}
-        />
+        <div className="mapcol">
+          <WindMap
+            hour={hour}
+            dir={dirAt(day, hour)}
+            speed={speedAt(day, hour)}
+            gust={gustAt(day, hour)}
+            shift={shiftAt(day, hour)}
+            course={course}
+            legKm={legKm}
+            playing={playing}
+            facility={fac.pos}
+            facCustom={fac.custom}
+            placing={fac.placing}
+            onPlace={fac.place}
+            onHour={pick}
+            onTogglePlay={() => setPlaying((v) => !v)}
+          />
+          <MapTools
+            course={course}
+            legKm={legKm}
+            onCourse={setCourse}
+            onLeg={setLegKm}
+            placing={fac.placing}
+            facCustom={fac.custom}
+            onTogglePlacing={() => fac.setPlacing(!fac.placing)}
+          />
+        </div>
         <Verdict summary={summary} dayText={dayText} hour={hour} shift={shiftAt(day, hour)} />
       </div>
 

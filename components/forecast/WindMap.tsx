@@ -1,12 +1,12 @@
 "use client";
 
-// 練習エリアの地図：実際の海岸線、風の流れ、コース、臨海研修所。ドラッグで移動、ピンチ／ホイールで拡大縮小。
+// 練習エリアの地図：実際の海岸線、風の流れ、コース、レイライン、臨海研修所。
+// 操作：マウスはドラッグで移動・ホイールとダブルクリックで拡大。スマホは2本指で移動・拡大（1本指はページのスクロール）、ダブルタップで拡大。
 import { useEffect, useRef, useState } from "react";
-import { BASE_LEG_KM, COURSES, LEG_OPTIONS, markPoint, type CourseKey } from "@/lib/courses";
+import { BASE_LEG_KM, COURSES, markPoint, type CourseKey } from "@/lib/courses";
 import {
   BAY_BOUNDS,
   COURSE_CENTER,
-  FACILITY_DEFAULT,
   KM_PER_DEG,
   KX,
   PLACES,
@@ -15,22 +15,25 @@ import {
   isSea,
 } from "@/lib/terrain";
 import { compass, norm } from "@/lib/wind";
+import type { LatLon } from "./useFacility";
 
 type Props = {
   hour: number;
   dir: number; // 練習エリアの代表風向
   speed: number;
   gust: number | null;
+  shift: number; // 10–11時の平均からの振れ（＋が右）
   course: CourseKey;
   legKm: number;
   playing: boolean;
+  facility: LatLon;
+  facCustom: boolean;
+  placing: boolean;
+  onPlace: (p: LatLon) => void;
   onHour: (h: number) => void;
   onTogglePlay: () => void;
-  onCourse: (c: CourseKey) => void;
-  onLeg: (km: number) => void;
 };
 
-const FAC_KEY = "kazami-fac";
 const PARTICLES = 110;
 const css = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const rgb = (v: string): [number, number, number] => {
@@ -43,23 +46,16 @@ export default function WindMap(p: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const live = useRef(p); // 描画ループから最新の props を読む
   live.current = p;
-  const [facility, setFacility] = useState(FACILITY_DEFAULT);
-  const [facCustom, setFacCustom] = useState(false);
-  const [placing, setPlacing] = useState(false);
-  const facRef = useRef({ pos: facility, custom: facCustom, placing });
-  facRef.current = { pos: facility, custom: facCustom, placing };
+  const [hint, setHint] = useState(false);
+  const hintTimer = useRef(0);
+  const showHint = () => {
+    setHint(true);
+    clearTimeout(hintTimer.current);
+    hintTimer.current = window.setTimeout(() => setHint(false), 1600);
+  };
+  const showHintRef = useRef(showHint);
+  showHintRef.current = showHint;
   const api = useRef<{ zoomBy: (f: number) => void; fit: (what: "course" | "area" | "bay") => void; redraw: () => void } | null>(null);
-
-  // 保存済みの研修所の位置
-  useEffect(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem(FAC_KEY) ?? "null");
-      if (v && typeof v.lat === "number") {
-        setFacility(v);
-        setFacCustom(true);
-      }
-    } catch {}
-  }, []);
 
   useEffect(() => {
     const wrap = wrapRef.current!;
@@ -75,6 +71,7 @@ export default function WindMap(p: Props) {
     let raf = 0;
     type P = { x: number; y: number; age: number; life: number };
     let parts: P[] = [];
+    let courseDot: [number, number] | null = null; // 縮小時のコースの印（タップでコースに寄る）
 
     const cy = () => (mh - 60) / 2 + 6;
     const sx = (lon: number) => mw / 2 + (lon - view.lon) * view.ppd * KX;
@@ -223,14 +220,32 @@ export default function WindMap(p: Props) {
       const pt = (key: string) => P(...markPoint(C, key));
       const [x0, y0] = P(0, 0);
       const [x1, y1] = P(0, BASE_LEG_KM);
+      courseDot = null;
       if (Math.hypot(x1 - x0, y1 - y0) < 22) {
+        courseDot = [(x0 + x1) / 2, (y0 + y1) / 2];
         ctx.fillStyle = col;
         ctx.beginPath();
         ctx.arc((x0 + x1) / 2, (y0 + y1) / 2, 5, 0, 7);
         ctx.fill();
-        text("コース（拡大で表示）", (x0 + x1) / 2 + 8, (y0 + y1) / 2 + 4, { size: 11, col });
+        text("コース（タップで拡大）", (x0 + x1) / 2 + 8, (y0 + y1) / 2 + 4, { size: 11, col });
         return;
       }
+      // レイライン：風上マークに真上りで届く線（風向から ±45°）。風が振れると一緒に回る
+      const [mx, my] = P(0, BASE_LEG_KM);
+      ctx.save();
+      ctx.strokeStyle = css("--ink-2");
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 4]);
+      for (const side of [-1, 1]) {
+        const [lx, ly] = P(side * BASE_LEG_KM * 0.55, BASE_LEG_KM * 0.45);
+        ctx.beginPath();
+        ctx.moveTo(mx, my);
+        ctx.lineTo(lx, ly);
+        ctx.stroke();
+        if (side === 1) text("レイライン", lx + 4, ly + 4, { size: 10, col: css("--ink-3") });
+      }
+      ctx.restore();
       ctx.save();
       ctx.strokeStyle = col;
       ctx.lineWidth = 1.6;
@@ -315,9 +330,9 @@ export default function WindMap(p: Props) {
       }
       text("大 村 湾", sx(129.86), sy(32.975), { size: 14, col: css("--ink-3"), align: "center" });
       // 臨海研修所
-      const f = facRef.current;
-      const fx = sx(f.pos.lon);
-      const fy = sy(f.pos.lat);
+      const f = live.current;
+      const fx = sx(f.facility.lon);
+      const fy = sy(f.facility.lat);
       ctx.fillStyle = css("--ink");
       ctx.beginPath();
       ctx.moveTo(fx, fy - 9);
@@ -330,7 +345,7 @@ export default function WindMap(p: Props) {
       ctx.strokeStyle = css("--surface");
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      text(f.custom ? "臨海研修所" : "臨海研修所（仮）", fx, fy + 22, { align: "center", w: 700, col: css("--ink") });
+      text(f.facCustom ? "臨海研修所" : "臨海研修所（仮）", fx, fy + 22, { align: "center", w: 700, col: css("--ink") });
       // 方位・縮尺
       const nx = mw - 26;
       const ny = mh - 140;
@@ -420,46 +435,55 @@ export default function WindMap(p: Props) {
       viewChanged();
     };
 
-    // ドラッグで移動、ピンチ／ホイールで拡大縮小（感度は低め）
+    // マウス：ドラッグで移動。スマホ：2本指で移動と拡大（1本指はページのスクロールに任せる）。感度は低め
     const ptrs = new Map<number, [number, number]>();
-    let pinch: { d: number; ppd: number } | null = null;
+    let pinch: { d: number; ppd: number; mid: [number, number] } | null = null;
     let moved = false;
-    const local = (e: PointerEvent | WheelEvent): [number, number] => {
+    let lastTap = { t: 0, x: 0, y: 0 };
+    const local = (e: PointerEvent | WheelEvent | MouseEvent): [number, number] => {
       const r = wrap.getBoundingClientRect();
       return [e.clientX - r.left, e.clientY - r.top];
     };
-    const isUI = (e: Event) => (e.target as HTMLElement).closest("button,select,input,.mapctl,.maptag,.coursesel,.zoomctl,.facbtn");
+    const isUI = (e: Event) => (e.target as HTMLElement).closest("button,select,input,.mapctl,.maptag,.zoomctl");
+    const pan = (dx: number, dy: number) => {
+      view.lon -= dx / (view.ppd * KX);
+      view.lat += dy / view.ppd;
+      clamp();
+    };
     const onDown = (e: PointerEvent) => {
       if (isUI(e)) return;
-      wrap.setPointerCapture(e.pointerId);
+      if (e.pointerType !== "touch") wrap.setPointerCapture(e.pointerId);
       ptrs.set(e.pointerId, local(e));
       moved = false;
       if (ptrs.size === 2) {
         const [a, b] = [...ptrs.values()];
-        pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), ppd: view.ppd };
+        pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), ppd: view.ppd, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
       }
     };
     const onMove = (e: PointerEvent) => {
       const prev = ptrs.get(e.pointerId);
       if (!prev) return;
       const cur = local(e);
-      if (ptrs.size === 1) {
+      ptrs.set(e.pointerId, cur);
+      if (ptrs.size === 1 && e.pointerType !== "touch") {
         const dx = (cur[0] - prev[0]) * 0.85;
         const dy = (cur[1] - prev[1]) * 0.85;
         if (Math.abs(dx) + Math.abs(dy) > 0.5) {
-          view.lon -= dx / (view.ppd * KX);
-          view.lat += dy / view.ppd;
-          clamp();
+          pan(dx, dy);
           moved = true;
           viewChanged();
         }
+      } else if (ptrs.size === 1 && Math.hypot(cur[0] - prev[0], cur[1] - prev[1]) > 2) {
+        moved = true;
       }
-      ptrs.set(e.pointerId, cur);
       if (ptrs.size === 2 && pinch) {
         const [a, b] = [...ptrs.values()];
+        const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        pan((mid[0] - pinch.mid[0]) * 0.85, (mid[1] - pinch.mid[1]) * 0.85);
+        pinch.mid = mid;
         const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
         moved = true;
-        zoomAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (pinch.ppd * Math.pow(d / pinch.d, 0.6)) / view.ppd);
+        zoomAt(mid[0], mid[1], (pinch.ppd * Math.pow(d / pinch.d, 0.6)) / view.ppd);
       }
     };
     const onUp = (e: PointerEvent) => {
@@ -467,15 +491,32 @@ export default function WindMap(p: Props) {
       if (!at) return;
       ptrs.delete(e.pointerId);
       if (ptrs.size < 2) pinch = null;
-      if (!moved && e.type === "pointerup" && facRef.current.placing) {
-        const pos = { lat: +glat(at[1]).toFixed(5), lon: +glon(at[0]).toFixed(5) };
-        try {
-          localStorage.setItem(FAC_KEY, JSON.stringify(pos));
-        } catch {}
-        setFacility(pos);
-        setFacCustom(true);
-        setPlacing(false);
+      if (e.type === "pointercancel") {
+        // 1本指でなぞった（ブラウザがページのスクロールを始めた）
+        if (e.pointerType === "touch" && ptrs.size === 0) showHintRef.current();
+        return;
       }
+      if (moved || ptrs.size > 0) return;
+      if (live.current.placing) {
+        live.current.onPlace({ lat: +glat(at[1]).toFixed(5), lon: +glon(at[0]).toFixed(5) });
+        return;
+      }
+      const now = performance.now();
+      if (e.pointerType === "touch" && now - lastTap.t < 320 && Math.hypot(at[0] - lastTap.x, at[1] - lastTap.y) < 30) {
+        zoomAt(at[0], at[1], 1.8); // ダブルタップで拡大
+        lastTap.t = 0;
+        return;
+      }
+      lastTap = { t: now, x: at[0], y: at[1] };
+      if (courseDot && Math.hypot(at[0] - courseDot[0], at[1] - courseDot[1]) < 28) {
+        fit("course");
+        viewChanged();
+      }
+    };
+    const onDbl = (e: MouseEvent) => {
+      if (isUI(e)) return;
+      const [x, y] = local(e);
+      zoomAt(x, y, 1.8);
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -488,6 +529,7 @@ export default function WindMap(p: Props) {
     wrap.addEventListener("pointerup", onUp);
     wrap.addEventListener("pointercancel", onUp);
     wrap.addEventListener("wheel", onWheel, { passive: false });
+    wrap.addEventListener("dblclick", onDbl);
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
     // テーマ（ライト／ダーク）が変わったら色を作り直す
@@ -522,6 +564,7 @@ export default function WindMap(p: Props) {
       wrap.removeEventListener("pointerup", onUp);
       wrap.removeEventListener("pointercancel", onUp);
       wrap.removeEventListener("wheel", onWheel);
+      wrap.removeEventListener("dblclick", onDbl);
       api.current = null;
     };
   }, []);
@@ -529,36 +572,31 @@ export default function WindMap(p: Props) {
   // 動きを減らす設定のときは、表示内容が変わるたびに描き直す
   useEffect(() => {
     api.current?.redraw();
-  }, [p.hour, p.dir, p.course, p.legKm, facility, facCustom]);
+  }, [p.hour, p.dir, p.course, p.legKm, p.facility, p.facCustom]);
 
+  const a = Math.round(Math.abs(p.shift));
   return (
-    <div className="mapwrap" id="mapwrap" ref={wrapRef} style={{ cursor: placing ? "crosshair" : undefined }}>
+    <div className="mapwrap" id="mapwrap" ref={wrapRef} style={{ cursor: p.placing ? "crosshair" : undefined }}>
       <canvas ref={canvasRef} aria-label="大村湾 練習エリアの風の流れ" />
       <div className="maptag">
         <span className="eyebrow">練習エリア</span>
-        <b className="num">
-          {Math.round(norm(p.dir))}°<small>{compass(p.dir)}</small>
-        </b>
+        <div className="windrow">
+          <svg viewBox="0 0 28 28" aria-hidden="true">
+            <circle cx="14" cy="14" r="13" fill="none" style={{ stroke: "var(--line)" }} />
+            <g transform={`rotate(${p.dir + 180} 14 14)`}>
+              <path d="M14 3 L19 12 L15.5 10.5 L15.5 24 L12.5 24 L12.5 10.5 L9 12Z" style={{ fill: "var(--accent)" }} />
+            </g>
+          </svg>
+          <b className="num">
+            {Math.round(norm(p.dir))}°<small>{compass(p.dir)}</small>
+          </b>
+        </div>
         <span className="num">
           {p.speed.toFixed(1)} m/s{p.gust != null && p.gust > p.speed + 0.5 ? ` · 突風 ${p.gust.toFixed(1)}` : ""}
         </span>
-      </div>
-      <div className="coursesel" role="group" aria-label="コース">
-        {(Object.keys(COURSES) as CourseKey[]).map((k) => (
-          <button key={k} type="button" aria-pressed={p.course === k} onClick={() => p.onCourse(k)}>
-            {COURSES[k].label}
-          </button>
-        ))}
-        <label className="sr" htmlFor="leg">
-          上りレグの長さ
-        </label>
-        <select id="leg" value={p.legKm} onChange={(e) => p.onLeg(+e.target.value)}>
-          {LEG_OPTIONS.map((o) => (
-            <option key={o.km} value={o.km}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <span className="shiftline" style={{ color: a < 3 ? "var(--ink-3)" : p.shift > 0 ? "var(--right)" : "var(--left)" }}>
+          {a < 3 ? "10–11時とほぼ同じ" : `10–11時より${p.shift > 0 ? "右" : "左"}へ ${a}°`}
+        </span>
       </div>
       <div className="zoomctl" role="group" aria-label="地図の拡大縮小">
         <button type="button" aria-label="拡大" onClick={() => api.current?.zoomBy(1.4)}>
@@ -577,9 +615,8 @@ export default function WindMap(p: Props) {
           湾全体
         </button>
       </div>
-      <button type="button" className="facbtn" aria-pressed={placing} onClick={() => setPlacing(!placing)}>
-        {placing ? "地図をタップして研修所の位置を決める" : facCustom ? "研修所の位置を直す" : "研修所の位置を直す（今は仮の位置）"}
-      </button>
+      {p.placing && <div className="mapnote">地図をタップして研修所の位置を決めてください</div>}
+      {hint && !p.placing && <div className="mapnote">地図は2本指で動かせます</div>}
       <div className="mapctl">
         <button className="play" type="button" aria-label={p.playing ? "停止" : "時間を再生"} onClick={p.onTogglePlay}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
