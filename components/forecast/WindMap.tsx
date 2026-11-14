@@ -16,6 +16,7 @@ import {
 } from "@/lib/terrain";
 import { compass, norm } from "@/lib/wind";
 import type { LatLon } from "./useFacility";
+import WindCompass from "./WindCompass";
 
 type Props = {
   hour: number;
@@ -579,24 +580,22 @@ export default function WindMap(p: Props) {
     <div className="mapwrap" id="mapwrap" ref={wrapRef} style={{ cursor: p.placing ? "crosshair" : undefined }}>
       <canvas ref={canvasRef} aria-label="大村湾 練習エリアの風の流れ" />
       <div className="maptag">
-        <span className="eyebrow">練習エリア</span>
-        <div className="windrow">
-          <svg viewBox="0 0 28 28" aria-hidden="true">
-            <circle cx="14" cy="14" r="13" fill="none" style={{ stroke: "var(--line)" }} />
-            <g transform={`rotate(${p.dir + 180} 14 14)`}>
-              <path d="M14 3 L19 12 L15.5 10.5 L15.5 24 L12.5 24 L12.5 10.5 L9 12Z" style={{ fill: "var(--accent)" }} />
-            </g>
-          </svg>
+        <WindCompass dir={p.dir} base={p.dir - p.shift} />
+        <div className="tagtext">
+          <span className="eyebrow">練習エリア</span>
           <b className="num">
             {Math.round(norm(p.dir))}°<small>{compass(p.dir)}</small>
           </b>
+          <span className="num">
+            {p.speed.toFixed(1)} m/s{p.gust != null && p.gust > p.speed + 0.5 ? ` · 突風 ${p.gust.toFixed(1)}` : ""}
+          </span>
+          <span className="shiftline" style={{ color: a < 3 ? "var(--ink-3)" : p.shift > 0 ? "var(--right)" : "var(--left)" }}>
+            {a < 3 ? "10–11時とほぼ同じ" : `10–11時より${p.shift > 0 ? "右" : "左"}へ ${a}°`}
+          </span>
+          <span className="taglegend">
+            <i className="lg-now" />今の風 <i className="lg-base" />10–11時
+          </span>
         </div>
-        <span className="num">
-          {p.speed.toFixed(1)} m/s{p.gust != null && p.gust > p.speed + 0.5 ? ` · 突風 ${p.gust.toFixed(1)}` : ""}
-        </span>
-        <span className="shiftline" style={{ color: a < 3 ? "var(--ink-3)" : p.shift > 0 ? "var(--right)" : "var(--left)" }}>
-          {a < 3 ? "10–11時とほぼ同じ" : `10–11時より${p.shift > 0 ? "右" : "左"}へ ${a}°`}
-        </span>
       </div>
       <div className="zoomctl" role="group" aria-label="地図の拡大縮小">
         <button type="button" aria-label="拡大" onClick={() => api.current?.zoomBy(1.4)}>
