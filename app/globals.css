@@ -230,3 +230,6 @@ thead th{color:var(--ink-3);font-weight:500;font-size:11px}
 .mapbox svg{display:block;width:100%;height:auto}
 .sample{font-size:11px;color:var(--warn);font-weight:700}
 footer{color:var(--ink-3);font-size:12px;padding-block:0 32px}
+
+.mapcredit{position:absolute;left:12px;bottom:64px;z-index:2;background:color-mix(in srgb,var(--surface) 88%,transparent);color:var(--ink-2);border-radius:6px;padding:2px 8px;font-size:10.5px;text-decoration:none}
+.mapcredit:hover{color:var(--accent)}

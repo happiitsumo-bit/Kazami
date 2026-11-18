@@ -47,7 +47,7 @@ export default function KazamiApp({ fc, obs }: { fc: Forecast; obs: Observation 
       </main>
       <footer className="wrap">
         「風の予報」タブは Open-Meteo の予報（気象庁 MSM・ECMWF IFS 9km・ICON）を Supabase に毎時保存したものを表示し、10分ごとに更新します。
-        「似た日から読む」「実測と答え合わせ」「レース振り返り」タブはサンプルです。地図の海岸線は標高データ（約200m間隔）から作成。
+        「似た日から読む」「実測と答え合わせ」「レース振り返り」タブはサンプルです。地図の背景は国土地理院のシームレス空中写真（「地図」に切り替えると標高データから描いた海岸線）。
       </footer>
     </>
   );

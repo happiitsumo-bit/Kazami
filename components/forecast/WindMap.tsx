@@ -27,6 +27,7 @@ type Props = {
   course: CourseKey;
   legKm: number;
   playing: boolean;
+  satellite: boolean; // true: 航空写真、false: 標高データから描いた地図
   facility: LatLon;
   facCustom: boolean;
   placing: boolean;
@@ -56,7 +57,7 @@ export default function WindMap(p: Props) {
   };
   const showHintRef = useRef(showHint);
   showHintRef.current = showHint;
-  const api = useRef<{ zoomBy: (f: number) => void; fit: (what: "course" | "area" | "bay") => void; redraw: () => void } | null>(null);
+  const api = useRef<{ zoomBy: (f: number) => void; fit: (what: "course" | "area" | "bay") => void; redraw: () => void; refresh: () => void } | null>(null);
 
   useEffect(() => {
     const wrap = wrapRef.current!;
@@ -111,9 +112,66 @@ export default function WindMap(p: Props) {
       clamp();
     };
 
-    // 海岸線と陸の濃淡（ビュー変更時だけ作り直す）
+    // ---- 航空写真（国土地理院 シームレス空中写真）----
+    type Tile = { img: HTMLImageElement; ok: boolean };
+    const tiles = new Map<string, Tile>();
+    const MAX_TILES = 400;
+    const tileZoom = () => Math.max(10, Math.min(17, Math.round(Math.log2((view.ppd * KX * 360) / 256))));
+    const lat2y = (lat: number, n: number) => ((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n;
+    const y2lat = (y: number, n: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+    const getTile = (z: number, x: number, y: number) => {
+      const key = `${z}/${x}/${y}`;
+      let t = tiles.get(key);
+      if (!t) {
+        const img = new Image();
+        t = { img, ok: false };
+        const tt = t;
+        img.onload = () => {
+          tt.ok = true;
+          if (reduce) draw();
+        };
+        img.src = `https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/${z}/${x}/${y}.jpg`;
+        tiles.set(key, t);
+        if (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value as string);
+      }
+      return t;
+    };
+    const drawPhoto = () => {
+      ctx.fillStyle = "#0f2a3b"; // 読み込み前・写真のない場所は暗い海の色
+      ctx.fillRect(0, 0, mw, mh);
+      const z = tileZoom();
+      const n = 2 ** z;
+      const lonL = glon(0);
+      const lonR = glon(mw);
+      const x0 = Math.floor(((lonL + 180) / 360) * n);
+      const x1 = Math.floor(((lonR + 180) / 360) * n);
+      const y0 = Math.floor(lat2y(glat(0), n));
+      const y1 = Math.floor(lat2y(glat(mh), n));
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 60) return; // 引きすぎのときは読み込まない
+      for (let tx = x0; tx <= x1; tx++)
+        for (let ty = y0; ty <= y1; ty++) {
+          const t = getTile(z, tx, ty);
+          if (!t.ok) continue;
+          const ln0 = (tx / n) * 360 - 180;
+          const ln1 = ((tx + 1) / n) * 360 - 180;
+          const la0 = y2lat(ty, n);
+          const la1 = y2lat(ty + 1, n);
+          const px = sx(ln0);
+          const py = sy(la0);
+          ctx.drawImage(t.img, px, py, sx(ln1) - px + 0.6, sy(la1) - py + 0.6); // 継ぎ目が出ないよう少し重ねる
+        }
+    };
+    // 写真の上は白＋暗い縁取り、地図の上は今までの色
+    let pal = { ink: "", ink2: "", ink3: "", halo: "", inv: "", pin: "", streak: "", icon: "" };
+    const makePalette = () => {
+      pal = live.current.satellite
+        ? { ink: "#ffffff", ink2: "#eef4f8", ink3: "#c9d6df", halo: "rgba(4,14,24,0.78)", inv: "rgba(4,14,24,0.85)", pin: "#ff6f61", streak: "#ffffff", icon: "#ffb347" }
+        : { ink: css("--ink"), ink2: css("--ink-2"), ink3: css("--ink-3"), halo: css("--surface"), inv: css("--surface"), pin: css("--left"), streak: css("--streak"), icon: css("--icon") };
+    };
+
+    // 海岸線と陸の濃淡（地図モードのとき、ビュー変更時だけ作り直す）
     const renderBase = (scale: number) => {
-      if (!mw) return;
+      if (!mw || live.current.satellite) return;
       const w = Math.max(1, Math.round(mw * scale));
       const h = Math.max(1, Math.round(mh * scale));
       base = document.createElement("canvas");
@@ -198,9 +256,9 @@ export default function WindMap(p: Props) {
       ctx.font = `${o.w ?? 600} ${o.size ?? 12}px "Noto Sans JP",sans-serif`;
       ctx.textAlign = o.align ?? "left";
       ctx.lineWidth = 3;
-      ctx.strokeStyle = css("--surface");
+      ctx.strokeStyle = pal.halo;
       ctx.strokeText(t, x, y);
-      ctx.fillStyle = o.col ?? css("--ink-2");
+      ctx.fillStyle = o.col ?? pal.ink2;
       ctx.fillText(t, x, y);
       ctx.textAlign = "left";
     };
@@ -209,7 +267,7 @@ export default function WindMap(p: Props) {
       const { course, legKm, dir } = live.current;
       const C = COURSES[course];
       const r = (dir * Math.PI) / 180;
-      const col = css("--icon");
+      const col = pal.icon;
       const k = legKm / BASE_LEG_KM; // 上り（スタート〜1）の長さ = legKm
       const P = (u: number, v: number): [number, number] => {
         u *= k;
@@ -234,7 +292,7 @@ export default function WindMap(p: Props) {
       // レイライン：風上マークに真上りで届く線（風向から ±45°）。風が振れると一緒に回る
       const [mx, my] = P(0, BASE_LEG_KM);
       ctx.save();
-      ctx.strokeStyle = css("--ink-2");
+      ctx.strokeStyle = pal.ink2;
       ctx.globalAlpha = 0.55;
       ctx.lineWidth = 1.2;
       ctx.setLineDash([4, 4]);
@@ -244,7 +302,7 @@ export default function WindMap(p: Props) {
         ctx.moveTo(mx, my);
         ctx.lineTo(lx, ly);
         ctx.stroke();
-        if (side === 1) text("レイライン", lx + 4, ly + 4, { size: 10, col: css("--ink-3") });
+        if (side === 1) text("レイライン", lx + 4, ly + 4, { size: 10, col: pal.ink3 });
       }
       ctx.restore();
       ctx.save();
@@ -269,13 +327,13 @@ export default function WindMap(p: Props) {
       ctx.restore();
       const [s1x, s1y] = P(-0.25, 0);
       const [s2x, s2y] = P(0.25, 0);
-      ctx.strokeStyle = css("--ink");
+      ctx.strokeStyle = pal.ink;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(s1x, s1y);
       ctx.lineTo(s2x, s2y);
       ctx.stroke();
-      ctx.fillStyle = css("--ink");
+      ctx.fillStyle = pal.ink;
       ctx.fillRect(s2x - 4, s2y - 4, 8, 8);
       text("スタート", s2x + 8, s2y + 16, { size: 11 });
       for (const [u, v] of Object.values(C.marks)) {
@@ -284,7 +342,7 @@ export default function WindMap(p: Props) {
         ctx.beginPath();
         ctx.arc(x, y, 5.5, 0, 7);
         ctx.fill();
-        ctx.strokeStyle = css("--surface");
+        ctx.strokeStyle = pal.inv;
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
@@ -295,7 +353,7 @@ export default function WindMap(p: Props) {
         const oy = key === "1" || key === "2" ? 4 : -6;
         ctx.font = '700 12px "JetBrains Mono",monospace';
         ctx.lineWidth = 3;
-        ctx.strokeStyle = css("--surface");
+        ctx.strokeStyle = pal.inv;
         ctx.strokeText(key, x + ox, y + oy);
         ctx.fillStyle = col;
         ctx.fillText(key, x + ox, y + oy);
@@ -303,8 +361,9 @@ export default function WindMap(p: Props) {
     };
 
     const drawOverlay = () => {
-      if (base) ctx.drawImage(base, 0, 0, mw, mh);
-      const pin = css("--left");
+      if (live.current.satellite) drawPhoto();
+      else if (base) ctx.drawImage(base, 0, 0, mw, mh);
+      const pin = pal.pin;
       const A = PRACTICE_AREA;
       ctx.save();
       ctx.setLineDash([7, 5]);
@@ -318,7 +377,7 @@ export default function WindMap(p: Props) {
         const x = sx(pl.lon);
         const y = sy(pl.lat);
         if (pl.cross) {
-          ctx.strokeStyle = css("--ink");
+          ctx.strokeStyle = pal.ink;
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(x - 6, y);
@@ -329,12 +388,12 @@ export default function WindMap(p: Props) {
         }
         text(pl.name, x + pl.dx, y + pl.dy, { size: pl.size, align: pl.align });
       }
-      text("大 村 湾", sx(129.86), sy(32.975), { size: 14, col: css("--ink-3"), align: "center" });
+      text("大 村 湾", sx(129.86), sy(32.975), { size: 14, col: pal.ink3, align: "center" });
       // 臨海研修所
       const f = live.current;
       const fx = sx(f.facility.lon);
       const fy = sy(f.facility.lat);
-      ctx.fillStyle = css("--ink");
+      ctx.fillStyle = pal.ink;
       ctx.beginPath();
       ctx.moveTo(fx, fy - 9);
       ctx.lineTo(fx + 8, fy - 2);
@@ -343,15 +402,15 @@ export default function WindMap(p: Props) {
       ctx.lineTo(fx - 8, fy - 2);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = css("--surface");
+      ctx.strokeStyle = pal.inv;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      text(f.facCustom ? "臨海研修所" : "臨海研修所（仮）", fx, fy + 22, { align: "center", w: 700, col: css("--ink") });
+      text(f.facCustom ? "臨海研修所" : "臨海研修所（仮）", fx, fy + 22, { align: "center", w: 700, col: pal.ink });
       // 方位・縮尺
       const nx = mw - 26;
       const ny = mh - 140;
-      ctx.fillStyle = css("--ink-2");
-      ctx.strokeStyle = css("--ink-2");
+      ctx.fillStyle = pal.ink2;
+      ctx.strokeStyle = pal.ink2;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(nx, ny + 26);
@@ -377,9 +436,10 @@ export default function WindMap(p: Props) {
 
     const draw = () => {
       if (!mw) return;
+      makePalette();
       drawOverlay();
       const sc = mw / 400;
-      ctx.strokeStyle = css("--streak");
+      ctx.strokeStyle = pal.streak;
       ctx.lineCap = "round";
       for (const q of parts) {
         const [d, s] = localWind(q.x, q.y);
@@ -387,7 +447,7 @@ export default function WindMap(p: Props) {
         const vx = Math.cos(a) * s * 0.26 * sc;
         const vy = Math.sin(a) * s * 0.26 * sc;
         const fade = Math.min(1, q.age / 15, (q.life - q.age) / 15);
-        ctx.globalAlpha = 0.45 * Math.max(0, fade);
+        ctx.globalAlpha = (live.current.satellite ? 0.6 : 0.45) * Math.max(0, fade);
         ctx.lineWidth = 1.3;
         ctx.beginPath();
         ctx.moveTo(q.x - vx * 6, q.y - vy * 6);
@@ -550,6 +610,10 @@ export default function WindMap(p: Props) {
         viewChanged();
       },
       redraw: () => reduce && draw(),
+      refresh: () => {
+        renderBase(Math.min(2, devicePixelRatio || 1));
+        if (reduce) draw();
+      },
     };
     resize();
     if (!reduce) raf = requestAnimationFrame(loop);
@@ -574,6 +638,9 @@ export default function WindMap(p: Props) {
   useEffect(() => {
     api.current?.redraw();
   }, [p.hour, p.dir, p.course, p.legKm, p.facility, p.facCustom]);
+  useEffect(() => {
+    api.current?.refresh();
+  }, [p.satellite]);
 
   const a = Math.round(Math.abs(p.shift));
   return (
@@ -614,6 +681,11 @@ export default function WindMap(p: Props) {
           湾全体
         </button>
       </div>
+      {p.satellite && (
+        <a className="mapcredit" href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener noreferrer">
+          航空写真：国土地理院（シームレス空中写真）
+        </a>
+      )}
       {p.placing && <div className="mapnote">地図をタップして研修所の位置を決めてください</div>}
       {hint && !p.placing && <div className="mapnote">地図は2本指で動かせます</div>}
       <div className="mapctl">

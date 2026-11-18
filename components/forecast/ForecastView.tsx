@@ -23,6 +23,18 @@ export default function ForecastView({ fc, dayKey, dayText, shortDate }: Props) 
   const [course, setCourse] = useState<CourseKey>("wl");
   const [legKm, setLegKm] = useState(0.2);
   const fac = useFacility();
+  const [satellite, setSatellite] = useState(true); // 背景は航空写真が初期値
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("kazami-bg") === "map") setSatellite(false);
+    } catch {}
+  }, []);
+  const changeBg = (v: boolean) => {
+    setSatellite(v);
+    try {
+      localStorage.setItem("kazami-bg", v ? "photo" : "map");
+    } catch {}
+  };
 
   // ▶ で 8〜17時を順に送る
   useEffect(() => {
@@ -49,6 +61,7 @@ export default function ForecastView({ fc, dayKey, dayText, shortDate }: Props) 
             course={course}
             legKm={legKm}
             playing={playing}
+            satellite={satellite}
             facility={fac.pos}
             facCustom={fac.custom}
             placing={fac.placing}
@@ -61,6 +74,8 @@ export default function ForecastView({ fc, dayKey, dayText, shortDate }: Props) 
             legKm={legKm}
             onCourse={setCourse}
             onLeg={setLegKm}
+            satellite={satellite}
+            onSatellite={changeBg}
             placing={fac.placing}
             facCustom={fac.custom}
             onTogglePlacing={() => fac.setPlacing(!fac.placing)}

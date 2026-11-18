@@ -6,6 +6,8 @@ type Props = {
   legKm: number;
   onCourse: (c: CourseKey) => void;
   onLeg: (km: number) => void;
+  satellite: boolean;
+  onSatellite: (v: boolean) => void;
   placing: boolean;
   facCustom: boolean;
   onTogglePlacing: () => void;
@@ -35,6 +37,17 @@ export default function MapTools(p: Props) {
             </option>
           ))}
         </select>
+      </div>
+      <div className="toolgroup">
+        <span className="toollabel">背景</span>
+        <div className="seg2" role="group" aria-label="地図の背景">
+          <button type="button" aria-pressed={p.satellite} onClick={() => p.onSatellite(true)}>
+            航空写真
+          </button>
+          <button type="button" aria-pressed={!p.satellite} onClick={() => p.onSatellite(false)}>
+            地図
+          </button>
+        </div>
       </div>
       <button type="button" className="facbtn" aria-pressed={p.placing} onClick={p.onTogglePlacing}>
         {p.placing ? "やめる" : p.facCustom ? "研修所の位置を直す" : "研修所の位置を直す（今は仮）"}
