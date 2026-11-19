@@ -9,7 +9,7 @@ export type LatLon = { lat: number; lon: number };
 
 export function useFacility() {
   const [pos, setPos] = useState<LatLon>(FACILITY_DEFAULT);
-  const [custom, setCustom] = useState(false);
+  const [custom, setCustom] = useState(true); // 既定の位置は確認済みなので「仮」とは出さない（直した位置は端末に保存）
   const [placing, setPlacing] = useState(false);
 
   useEffect(() => {

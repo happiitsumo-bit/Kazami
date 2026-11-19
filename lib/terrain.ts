@@ -32,8 +32,8 @@ export const COURSE_CENTER = {
   lat: (PRACTICE_AREA.n + PRACTICE_AREA.s) / 2 + 0.004,
   lon: (PRACTICE_AREA.w + PRACTICE_AREA.e) / 2 + 0.004,
 };
-/** 長崎大学 臨海研修所（時津町子々川郷）。正確な座標が分かるまでの仮の位置 */
-export const FACILITY_DEFAULT = { lat: 32.857, lon: 129.822 };
+/** 長崎大学 臨海研修所（時津町子々川郷、田ノ浦の港のつけ根）。航空写真で部員に場所を確認してもらった位置 */
+export const FACILITY_DEFAULT = { lat: 32.8636, lon: 129.807 };
 
 export const PLACES = [
   { name: "琴海", lat: 32.9034, lon: 129.8037, dx: -4, dy: 4, align: "right" as const },
